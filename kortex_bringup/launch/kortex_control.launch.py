@@ -59,7 +59,7 @@ def launch_setup(context, *args, **kwargs):
 
     # if we are using fake hardware then we can't use the internal gripper communications of the hardware
     use_fake_hardware_value = use_fake_hardware.perform(context)
-    if use_fake_hardware_value == "true":
+    if use_fake_hardware_value == "true" or gripper.perform(context) == "":
         use_internal_bus_gripper_comm = "false"
 
     robot_description_content = Command(

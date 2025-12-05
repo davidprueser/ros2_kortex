@@ -400,6 +400,7 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
     stop_gripper_controller_ = false;
   start_joint_based_controller_ = start_twist_controller_ = start_fault_controller_ =
     start_gripper_controller_ = false;
+  torque_command_active_ = false;
 
   // sleep to ensure all outgoing write commands have finished
   block_write = true;
@@ -437,13 +438,7 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
       }
       if (key == joint.name + "/" + hardware_interface::HW_IF_EFFORT)
       {
-        continue;
-        // not supporting effort command interface
-        //              start_modes_.emplace_back(hardware_interface::HW_IF_EFFORT);
-        RCLCPP_ERROR(
-          LOGGER,
-          "KortexMultiInterfaceHardware does not support effort command "
-          "interface!");
+        stop_modes_.emplace_back(StopStartInterface::STOP_POS_VEL);
       }
     }
     if (
@@ -488,11 +483,9 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
       }
       if (key == joint.name + "/" + hardware_interface::HW_IF_EFFORT)
       {
-        continue;
-        RCLCPP_ERROR(
-          LOGGER,
-          "KortexMultiInterfaceHardware does not support effort command "
-          "interface!");
+        start_modes_.emplace_back(StopStartInterface::START_POS_VEL);
+        torque_command_active_ = true;
+
       }
     }
     if (
@@ -515,6 +508,7 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
       stop_modes_.end())
   {
     stop_joint_based_controller_ = true;
+    torque_command_active_ = false;
   }
   if (
     !stop_modes_.empty() &&
@@ -918,17 +912,22 @@ return_type KortexMultiInterfaceHardware::write(
 }
 
 void KortexMultiInterfaceHardware::prepareCommands()
-{  // update the command for each joint
+{
   for (size_t i = 0; i < actuator_count_; i++)
   {
-    // set command per joint
-    cmd_degrees_tmp_ = static_cast<float>(
-      KortexMathUtil::wrapDegreesFromZeroTo360(KortexMathUtil::toDeg(arm_commands_positions_[i])));
-    cmd_vel_tmp_ = static_cast<float>(KortexMathUtil::toDeg(arm_commands_velocities_[i]));
+    if (torque_command_active_)
+    {
+      float torque_cmd = static_cast<float>(arm_commands_efforts_[i]);
+      base_command_.mutable_actuators(static_cast<int>(i))->set_torque_joint(torque_cmd);
+    }
+    else
+    {
+      cmd_degrees_tmp_ = static_cast<float>(
+        KortexMathUtil::wrapDegreesFromZeroTo360(KortexMathUtil::toDeg(arm_commands_positions_[i])));
+      cmd_vel_tmp_ = static_cast<float>(KortexMathUtil::toDeg(arm_commands_velocities_[i]));
 
-    base_command_.mutable_actuators(static_cast<int>(i))->set_position(cmd_degrees_tmp_);
-    // Velocity command interface not implemented properly in the kortex api
-    // base_command_.mutable_actuators(i)->set_velocity(cmd_vel_tmp_);
+      base_command_.mutable_actuators(static_cast<int>(i))->set_position(cmd_degrees_tmp_);
+    }
     base_command_.mutable_actuators(static_cast<int>(i))->set_command_id(base_command_.frame_id());
   }
 }

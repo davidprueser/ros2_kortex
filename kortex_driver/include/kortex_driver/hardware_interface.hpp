@@ -192,6 +192,8 @@ private:
   bool start_gripper_controller_;
   bool start_fault_controller_;
 
+  bool torque_command_active_ = false;
+
   // first pass flag
   bool first_pass_;
 
