@@ -49,6 +49,7 @@
 #include "SessionManager.h"
 #include "TransportClientTcp.h"
 #include "TransportClientUdp.h"
+#include "ActuatorConfigClientRpc.h"
 
 namespace hardware_interface
 {
@@ -129,6 +130,7 @@ private:
   k_api::Base::BaseClient base_;
   k_api::BaseCyclic::BaseCyclicClient base_cyclic_;
   k_api::BaseCyclic::Command base_command_;
+  k_api::ActuatorConfig::ActuatorConfigClient* actuator_config;
   std::size_t actuator_count_;
   // To minimize bandwidth we synchronize feedback with the robot only when write() is called
   k_api::BaseCyclic::Feedback feedback_;

@@ -508,7 +508,6 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
       stop_modes_.end())
   {
     stop_joint_based_controller_ = true;
-    torque_command_active_ = false;
   }
   if (
     !stop_modes_.empty() &&
@@ -584,6 +583,10 @@ return_type KortexMultiInterfaceHardware::perform_command_mode_switch(
   if (stop_joint_based_controller_)
   {
     joint_based_controller_running_ = false;
+    if (torque_command_active_)
+	{
+        arm_commands_efforts_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+	}
     arm_commands_positions_ = arm_positions_;
     arm_commands_velocities_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
   }
@@ -608,6 +611,10 @@ return_type KortexMultiInterfaceHardware::perform_command_mode_switch(
     base_.SetServoingMode(servoing_mode_hw_);
     arm_mode_ = k_api::Base::ServoingMode::LOW_LEVEL_SERVOING;
     twist_controller_running_ = false;
+	if (torque_command_active_)
+	{
+		arm_commands_efforts_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+	}
     arm_commands_positions_ = arm_positions_;
     arm_commands_velocities_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     joint_based_controller_running_ = true;
@@ -913,23 +920,38 @@ return_type KortexMultiInterfaceHardware::write(
 
 void KortexMultiInterfaceHardware::prepareCommands()
 {
-  for (size_t i = 0; i < actuator_count_; i++)
-  {
+    auto base_feedback = base_cyclic_.RefreshFeedback();
+    for (size_t i = 0; i < actuator_count_; i++)
+    {
+        base_command_.add_actuators()->set_position(base_feedback.actuators(i).position());
+    }
+
+    base_feedback = base_cyclic_.Refresh(base_command_);
+
     if (torque_command_active_)
     {
-      float torque_cmd = static_cast<float>(arm_commands_efforts_[i]);
-      base_command_.mutable_actuators(static_cast<int>(i))->set_torque_joint(torque_cmd);
+        auto control_mode_message = k_api::ActuatorConfig::ControlModeInformation();
+        control_mode_message.set_control_mode(k_api::ActuatorConfig::ControlMode::TORQUE);
+        actuator_config->SetControlMode(control_mode_message, 1);
+
+        for (int i = 0; i < actuator_count_; i++)
+        {
+            base_command_.mutable_actuators(static_cast<int>(i))->set_torque_joint(arm_commands_efforts_[i]);
+            base_command_.mutable_actuators(static_cast<int>(i))->set_command_id(base_command_.frame_id());
+        }
     }
     else
     {
-      cmd_degrees_tmp_ = static_cast<float>(
-        KortexMathUtil::wrapDegreesFromZeroTo360(KortexMathUtil::toDeg(arm_commands_positions_[i])));
-      cmd_vel_tmp_ = static_cast<float>(KortexMathUtil::toDeg(arm_commands_velocities_[i]));
+        for (size_t i = 0; i < actuator_count_; i++)
+        {
+          cmd_degrees_tmp_ = static_cast<float>(
+            KortexMathUtil::wrapDegreesFromZeroTo360(KortexMathUtil::toDeg(arm_commands_positions_[i])));
+          cmd_vel_tmp_ = static_cast<float>(KortexMathUtil::toDeg(arm_commands_velocities_[i]));
 
-      base_command_.mutable_actuators(static_cast<int>(i))->set_position(cmd_degrees_tmp_);
+          base_command_.mutable_actuators(static_cast<int>(i))->set_position(cmd_degrees_tmp_);
+          base_command_.mutable_actuators(static_cast<int>(i))->set_command_id(base_command_.frame_id());
+        }
     }
-    base_command_.mutable_actuators(static_cast<int>(i))->set_command_id(base_command_.frame_id());
-  }
 }
 
 void KortexMultiInterfaceHardware::sendJointCommands()
