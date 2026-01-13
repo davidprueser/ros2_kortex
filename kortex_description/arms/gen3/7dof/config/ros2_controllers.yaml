@@ -8,11 +8,8 @@ controller_manager:
     joint_trajectory_controller:
       type: joint_trajectory_controller/JointTrajectoryController
 
-    joint_6_effort_controller:
-      type: effort_controllers/JointGroupEffortController
-
-    joint_7_effort_controller:
-      type: effort_controllers/JointGroupEffortController
+    effort_controller:
+      type: forward_command_controller/ForwardCommandController
 
     twist_controller:
       type: picknik_twist_controller/PicknikTwistController
@@ -31,6 +28,8 @@ joint_trajectory_controller:
       - joint_3
       - joint_4
       - joint_5
+      - joint_6
+      - joint_7
     command_interfaces:
       - position
     state_interfaces:
@@ -43,27 +42,18 @@ joint_trajectory_controller:
       stopped_velocity_tolerance: 0.0
       goal_time: 0.0
 
-joint_6_effort_controller:
+effort_controller:
   ros__parameters:
-    type: effort_controllers/JointGroupEffortController
+    type: forward_command_controller/ForwardCommandController
     joints:
+      - joint_1
+      - joint_2
+      - joint_3
+      - joint_4
+      - joint_5
       - joint_6
-    command_interfaces:
-      - effort
-    state_interfaces:
-      - position
-      - velocity
-
-joint_7_effort_controller:
-  ros__parameters:
-    type: effort_controllers/JointGroupEffortController
-    joints:
       - joint_7
-    command_interfaces:
-      - effort
-    state_interfaces:
-      - position
-      - velocity
+    interface_name: effort
 
 twist_controller:
   ros__parameters:

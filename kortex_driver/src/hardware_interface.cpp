@@ -52,6 +52,7 @@ KortexMultiInterfaceHardware::KortexMultiInterfaceHardware()
     &transport_udp_realtime_,
     [](k_api::KError err) { cout << "_________ callback error _________" << err.toString(); }},
   session_manager_real_time_{&router_udp_realtime_},
+  actuator_config(new k_api::ActuatorConfig::ActuatorConfigClient(&router_tcp_)),
   k_api_twist_(nullptr),
   base_{&router_tcp_},
   base_cyclic_{&router_udp_realtime_},
@@ -439,6 +440,7 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
       if (key == joint.name + "/" + hardware_interface::HW_IF_EFFORT)
       {
         stop_modes_.emplace_back(StopStartInterface::STOP_POS_VEL);
+		torque_command_active_ = false;
       }
     }
     if (
@@ -579,13 +581,38 @@ return_type KortexMultiInterfaceHardware::perform_command_mode_switch(
   const vector<std::string> & /*start_interfaces*/, const vector<std::string> & /*stop_interfaces*/)
 {
   hardware_interface::return_type ret_val = hardware_interface::return_type::OK;
+  auto control_mode_message = k_api::ActuatorConfig::ControlModeInformation();
 
   if (stop_joint_based_controller_)
   {
     joint_based_controller_running_ = false;
     if (torque_command_active_)
 	{
-        arm_commands_efforts_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        for (int i = 1; i <= actuator_count_; i++){
+            control_mode_message.set_control_mode(k_api::ActuatorConfig::ControlMode::POSITION);
+				torque_command_active_ = false;
+            try
+            {
+                actuator_config->SetControlMode(control_mode_message, i);
+            }
+            catch (k_api::KDetailedException & ex)
+            {
+              RCLCPP_ERROR_STREAM(LOGGER, "Kortex exception while setting control mode to POSITION: " << ex.what());
+              RCLCPP_ERROR_STREAM(
+                LOGGER, "Error sub-code: " << k_api::SubErrorCodes_Name(
+                          k_api::SubErrorCodes((ex.getErrorInfo().getError().error_sub_code()))));
+              torque_command_active_ = false;
+              return hardware_interface::return_type::ERROR;
+            }
+            catch (std::exception & ex_std)
+            {
+              RCLCPP_ERROR_STREAM(LOGGER, "Exception while setting control mode to POSITION: " << ex_std.what());
+              torque_command_active_ = false;
+              return hardware_interface::return_type::ERROR;
+            }
+        }
+
+        arm_commands_efforts_ = arm_efforts_;
 	}
     arm_commands_positions_ = arm_positions_;
     arm_commands_velocities_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
@@ -613,7 +640,31 @@ return_type KortexMultiInterfaceHardware::perform_command_mode_switch(
     twist_controller_running_ = false;
 	if (torque_command_active_)
 	{
-		arm_commands_efforts_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        control_mode_message.set_control_mode(k_api::ActuatorConfig::ControlMode::TORQUE);
+		for (int i = 1; i <= actuator_count_; i++){
+            try
+            {
+              actuator_config->SetControlMode(control_mode_message, i);
+            }
+            catch (k_api::KDetailedException & ex)
+            {
+              RCLCPP_ERROR_STREAM(LOGGER, "Kortex exception while setting control mode to TORQUE: " << ex.what());
+              RCLCPP_ERROR_STREAM(
+                LOGGER, "Error sub-code: " << k_api::SubErrorCodes_Name(
+                          k_api::SubErrorCodes((ex.getErrorInfo().getError().error_sub_code()))));
+              torque_command_active_ = false;
+              return hardware_interface::return_type::ERROR;
+            }
+            catch (std::exception & ex_std)
+            {
+              RCLCPP_ERROR_STREAM(LOGGER, "Exception while setting control mode to TORQUE: " << ex_std.what());
+              torque_command_active_ = false;
+              return hardware_interface::return_type::ERROR;
+            }
+		}
+
+		arm_commands_efforts_ = arm_efforts_;
+        RCLCPP_INFO(LOGGER, "efforts '%f'.", arm_commands_efforts_);
 	}
     arm_commands_positions_ = arm_positions_;
     arm_commands_velocities_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
@@ -744,6 +795,9 @@ CallbackReturn KortexMultiInterfaceHardware::on_deactivate(
   // memory handling
   delete k_api_twist_;
   delete gripper_motor_command_;
+
+  delete actuator_config;
+  actuator_config = nullptr;
 
   RCLCPP_INFO(LOGGER, "KortexMultiInterfaceHardware successfully deactivated!");
 
@@ -920,22 +974,12 @@ return_type KortexMultiInterfaceHardware::write(
 
 void KortexMultiInterfaceHardware::prepareCommands()
 {
-    auto base_feedback = base_cyclic_.RefreshFeedback();
-    for (size_t i = 0; i < actuator_count_; i++)
-    {
-        base_command_.add_actuators()->set_position(base_feedback.actuators(i).position());
-    }
-
-    base_feedback = base_cyclic_.Refresh(base_command_);
-
     if (torque_command_active_)
     {
-        auto control_mode_message = k_api::ActuatorConfig::ControlModeInformation();
-        control_mode_message.set_control_mode(k_api::ActuatorConfig::ControlMode::TORQUE);
-        actuator_config->SetControlMode(control_mode_message, 1);
-
+        auto base_feedback = base_cyclic_.RefreshFeedback();
         for (int i = 0; i < actuator_count_; i++)
         {
+            base_command_.mutable_actuators(static_cast<int>(i))->set_position(base_feedback.actuators(i).position());
             base_command_.mutable_actuators(static_cast<int>(i))->set_torque_joint(arm_commands_efforts_[i]);
             base_command_.mutable_actuators(static_cast<int>(i))->set_command_id(base_command_.frame_id());
         }
