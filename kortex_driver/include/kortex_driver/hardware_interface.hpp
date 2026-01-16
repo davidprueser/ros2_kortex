@@ -68,11 +68,11 @@ namespace kortex_driver
 enum class StopStartInterface
 {
   NONE,
-  STOP_POS_VEL,
+  STOP_JOINT_BASED,
   STOP_TWIST,
   STOP_GRIPPER,
   STOP_FAULT_CTRL,
-  START_POS_VEL,
+  START_JOINT_BASED,
   START_TWIST,
   START_GRIPPER,
   START_FAULT_CTRL,
@@ -174,6 +174,9 @@ private:
   k_api::Base::ServoingModeInformation servoing_mode_hw_;
   // what controller is running
   bool joint_based_controller_running_;
+  bool position_controller_running_;
+  bool velocity_controller_running_;
+  bool torque_controller_running_;
   bool twist_controller_running_;
   bool gripper_controller_running_;
   bool fault_controller_running_;
@@ -193,8 +196,6 @@ private:
   bool start_twist_controller_;
   bool start_gripper_controller_;
   bool start_fault_controller_;
-
-  bool torque_command_active_ = false;
 
   // first pass flag
   bool first_pass_;

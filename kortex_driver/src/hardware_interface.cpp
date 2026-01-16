@@ -401,7 +401,6 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
     stop_gripper_controller_ = false;
   start_joint_based_controller_ = start_twist_controller_ = start_fault_controller_ =
     start_gripper_controller_ = false;
-  torque_command_active_ = false;
 
   // sleep to ensure all outgoing write commands have finished
   block_write = true;
@@ -431,16 +430,18 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
       }
       if (key == joint.name + "/" + hardware_interface::HW_IF_POSITION)
       {
-        stop_modes_.emplace_back(StopStartInterface::STOP_POS_VEL);
+        stop_modes_.emplace_back(StopStartInterface::STOP_JOINT_BASED);
+        position_controller_running_ = false;
       }
       if (key == joint.name + "/" + hardware_interface::HW_IF_VELOCITY)
       {
-        stop_modes_.emplace_back(StopStartInterface::STOP_POS_VEL);
+        stop_modes_.emplace_back(StopStartInterface::STOP_JOINT_BASED);
+		velocity_controller_running_ = false;
       }
       if (key == joint.name + "/" + hardware_interface::HW_IF_EFFORT)
       {
-        stop_modes_.emplace_back(StopStartInterface::STOP_POS_VEL);
-		torque_command_active_ = false;
+        stop_modes_.emplace_back(StopStartInterface::STOP_JOINT_BASED);
+		torque_controller_running_ = false;
       }
     }
     if (
@@ -477,16 +478,18 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
       }
       if (key == joint.name + "/" + hardware_interface::HW_IF_POSITION)
       {
-        start_modes_.emplace_back(StopStartInterface::START_POS_VEL);
+        start_modes_.emplace_back(StopStartInterface::START_JOINT_BASED);
+		position_controller_running_ = true;
       }
       if (key == joint.name + "/" + hardware_interface::HW_IF_VELOCITY)
       {
-        start_modes_.emplace_back(StopStartInterface::START_POS_VEL);
+        start_modes_.emplace_back(StopStartInterface::START_JOINT_BASED);
+		velocity_controller_running_ = true;
       }
       if (key == joint.name + "/" + hardware_interface::HW_IF_EFFORT)
       {
-        start_modes_.emplace_back(StopStartInterface::START_POS_VEL);
-        torque_command_active_ = true;
+        start_modes_.emplace_back(StopStartInterface::START_JOINT_BASED);
+        torque_controller_running_ = true;
 
       }
     }
@@ -506,7 +509,7 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
   // prepare flags for performing the switch
   if (
     !stop_modes_.empty() &&
-    std::find(stop_modes_.begin(), stop_modes_.end(), StopStartInterface::STOP_POS_VEL) !=
+    std::find(stop_modes_.begin(), stop_modes_.end(), StopStartInterface::STOP_JOINT_BASED) !=
       stop_modes_.end())
   {
     stop_joint_based_controller_ = true;
@@ -535,7 +538,7 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
 
   if (
     !start_modes_.empty() &&
-    (std::find(start_modes_.begin(), start_modes_.end(), StopStartInterface::START_POS_VEL) !=
+    (std::find(start_modes_.begin(), start_modes_.end(), StopStartInterface::START_JOINT_BASED) !=
      start_modes_.end()))
   {
     start_joint_based_controller_ = true;
@@ -585,35 +588,10 @@ return_type KortexMultiInterfaceHardware::perform_command_mode_switch(
 
   if (stop_joint_based_controller_)
   {
+    RCLCPP_INFO(LOGGER, "In the stop joint based controller callback.");
     joint_based_controller_running_ = false;
-    if (torque_command_active_)
-	{
-        for (int i = 1; i <= actuator_count_; i++){
-            control_mode_message.set_control_mode(k_api::ActuatorConfig::ControlMode::POSITION);
-				torque_command_active_ = false;
-            try
-            {
-                actuator_config->SetControlMode(control_mode_message, i);
-            }
-            catch (k_api::KDetailedException & ex)
-            {
-              RCLCPP_ERROR_STREAM(LOGGER, "Kortex exception while setting control mode to POSITION: " << ex.what());
-              RCLCPP_ERROR_STREAM(
-                LOGGER, "Error sub-code: " << k_api::SubErrorCodes_Name(
-                          k_api::SubErrorCodes((ex.getErrorInfo().getError().error_sub_code()))));
-              torque_command_active_ = false;
-              return hardware_interface::return_type::ERROR;
-            }
-            catch (std::exception & ex_std)
-            {
-              RCLCPP_ERROR_STREAM(LOGGER, "Exception while setting control mode to POSITION: " << ex_std.what());
-              torque_command_active_ = false;
-              return hardware_interface::return_type::ERROR;
-            }
-        }
 
-        arm_commands_efforts_ = arm_efforts_;
-	}
+    arm_commands_efforts_ = arm_efforts_;
     arm_commands_positions_ = arm_positions_;
     arm_commands_velocities_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
   }
@@ -638,34 +616,24 @@ return_type KortexMultiInterfaceHardware::perform_command_mode_switch(
     base_.SetServoingMode(servoing_mode_hw_);
     arm_mode_ = k_api::Base::ServoingMode::LOW_LEVEL_SERVOING;
     twist_controller_running_ = false;
-	if (torque_command_active_)
+	if (position_controller_running_)
+	{
+		control_mode_message.set_control_mode(k_api::ActuatorConfig::ControlMode::POSITION);
+    }
+	if (velocity_controller_running_)
+	{
+        control_mode_message.set_control_mode(k_api::ActuatorConfig::ControlMode::VELOCITY);
+    }
+	if (torque_controller_running_)
 	{
         control_mode_message.set_control_mode(k_api::ActuatorConfig::ControlMode::TORQUE);
-		for (int i = 1; i <= actuator_count_; i++){
-            try
-            {
-              actuator_config->SetControlMode(control_mode_message, i);
-            }
-            catch (k_api::KDetailedException & ex)
-            {
-              RCLCPP_ERROR_STREAM(LOGGER, "Kortex exception while setting control mode to TORQUE: " << ex.what());
-              RCLCPP_ERROR_STREAM(
-                LOGGER, "Error sub-code: " << k_api::SubErrorCodes_Name(
-                          k_api::SubErrorCodes((ex.getErrorInfo().getError().error_sub_code()))));
-              torque_command_active_ = false;
-              return hardware_interface::return_type::ERROR;
-            }
-            catch (std::exception & ex_std)
-            {
-              RCLCPP_ERROR_STREAM(LOGGER, "Exception while setting control mode to TORQUE: " << ex_std.what());
-              torque_command_active_ = false;
-              return hardware_interface::return_type::ERROR;
-            }
-		}
-
-		arm_commands_efforts_ = arm_efforts_;
-        RCLCPP_INFO(LOGGER, "efforts '%f'.", arm_commands_efforts_);
 	}
+
+    for (int i = 1; i <= actuator_count_; i++){
+        actuator_config->SetControlMode(control_mode_message, i);
+    }
+
+    arm_commands_efforts_ = arm_efforts_;
     arm_commands_positions_ = arm_positions_;
     arm_commands_velocities_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     joint_based_controller_running_ = true;
@@ -697,6 +665,9 @@ return_type KortexMultiInterfaceHardware::perform_command_mode_switch(
   start_joint_based_controller_ = start_twist_controller_ = start_fault_controller_ =
     start_gripper_controller_ = false;
 
+  position_controller_running_ = false;
+  velocity_controller_running_ = false;
+  torque_controller_running_ = false;
   start_modes_.clear();
   stop_modes_.clear();
 
@@ -974,7 +945,7 @@ return_type KortexMultiInterfaceHardware::write(
 
 void KortexMultiInterfaceHardware::prepareCommands()
 {
-    if (torque_command_active_)
+    if (torque_controller_running_)
     {
         auto base_feedback = base_cyclic_.RefreshFeedback();
         for (int i = 0; i < actuator_count_; i++)
@@ -984,9 +955,9 @@ void KortexMultiInterfaceHardware::prepareCommands()
             base_command_.mutable_actuators(static_cast<int>(i))->set_command_id(base_command_.frame_id());
         }
     }
-    else
+    else if (position_controller_running_)
     {
-        for (size_t i = 0; i < actuator_count_; i++)
+        for (int i = 0; i < actuator_count_; i++)
         {
           cmd_degrees_tmp_ = static_cast<float>(
             KortexMathUtil::wrapDegreesFromZeroTo360(KortexMathUtil::toDeg(arm_commands_positions_[i])));
