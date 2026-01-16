@@ -52,6 +52,7 @@ def launch_setup(context, *args, **kwargs):
     robot_traj_controller = LaunchConfiguration("robot_controller")
     robot_pos_controller = LaunchConfiguration("robot_pos_controller")
     robot_hand_controller = LaunchConfiguration("robot_hand_controller")
+    secondary_robot_controller = LaunchConfiguration("secondary_robot_controller")
     fault_controller = LaunchConfiguration("fault_controller")
     launch_rviz = LaunchConfiguration("launch_rviz")
     use_internal_bus_gripper_comm = LaunchConfiguration("use_internal_bus_gripper_comm")
@@ -167,10 +168,16 @@ def launch_setup(context, *args, **kwargs):
         condition=IfCondition(launch_rviz),
     )
 
-    robot_traj_controller_spawner = Node(
+    primary_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
         arguments=[robot_traj_controller, "-c", "/controller_manager"],
+    )
+
+    secondary_controller_spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=[secondary_robot_controller, "--inactive", "-c", "/controller_manager"],
     )
 
     robot_pos_controller_spawner = Node(
@@ -199,7 +206,8 @@ def launch_setup(context, *args, **kwargs):
         robot_state_publisher_node,
         joint_state_broadcaster_spawner,
         delay_rviz_after_joint_state_broadcaster_spawner,
-        robot_traj_controller_spawner,
+        primary_controller_spawner,
+        secondary_controller_spawner,
         robot_pos_controller_spawner,
         fault_controller_spawner,
     ]
@@ -379,6 +387,13 @@ def generate_launch_description():
             "gripper_joint_name",
             default_value="finger_joint",
             description="Max force for gripper commands",
+        )
+    )
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "secondary_robot_controller",
+            default_value="effort_controller",
+            description="Secondary robot controller (loaded but inactive)."
         )
     )
     return LaunchDescription(declared_arguments + [OpaqueFunction(function=launch_setup)])
