@@ -665,9 +665,6 @@ return_type KortexMultiInterfaceHardware::perform_command_mode_switch(
   start_joint_based_controller_ = start_twist_controller_ = start_fault_controller_ =
     start_gripper_controller_ = false;
 
-  position_controller_running_ = false;
-  velocity_controller_running_ = false;
-  torque_controller_running_ = false;
   start_modes_.clear();
   stop_modes_.clear();
 
@@ -747,6 +744,14 @@ CallbackReturn KortexMultiInterfaceHardware::on_deactivate(
   const rclcpp_lifecycle::State & /* previous_state */)
 {
   RCLCPP_INFO(LOGGER, "Deactivating KortexMultiInterfaceHardware...");
+  if (joint_based_controller_running_)
+  {
+      auto control_mode_message = k_api::ActuatorConfig::ControlModeInformation();
+	  control_mode_message.set_control_mode(k_api::ActuatorConfig::ControlMode::POSITION);
+      for (int i = 1; i <= actuator_count_; i++){
+          actuator_config->SetControlMode(control_mode_message, i);
+      }
+  }
 
   auto servoing_mode = k_api::Base::ServoingModeInformation();
   // Set back the servoing mode to Single Level Servoing
@@ -945,9 +950,9 @@ return_type KortexMultiInterfaceHardware::write(
 
 void KortexMultiInterfaceHardware::prepareCommands()
 {
+    auto base_feedback = base_cyclic_.RefreshFeedback();
     if (torque_controller_running_)
     {
-        auto base_feedback = base_cyclic_.RefreshFeedback();
         for (int i = 0; i < actuator_count_; i++)
         {
             base_command_.mutable_actuators(static_cast<int>(i))->set_position(base_feedback.actuators(i).position());
@@ -955,13 +960,22 @@ void KortexMultiInterfaceHardware::prepareCommands()
             base_command_.mutable_actuators(static_cast<int>(i))->set_command_id(base_command_.frame_id());
         }
     }
+    else if (velocity_controller_running_)
+    {
+      for (int i = 0; i < actuator_count_; i++)
+      {
+          base_command_.mutable_actuators(static_cast<int>(i))->set_position(base_feedback.actuators(i).position());
+          cmd_vel_tmp_ = static_cast<float>(KortexMathUtil::toDeg(arm_commands_velocities_[i]));
+          base_command_.mutable_actuators(static_cast<int>(i))->set_velocity(cmd_vel_tmp_);
+          base_command_.mutable_actuators(static_cast<int>(i))->set_command_id(base_command_.frame_id());
+      }
+    }
     else if (position_controller_running_)
     {
         for (int i = 0; i < actuator_count_; i++)
         {
           cmd_degrees_tmp_ = static_cast<float>(
             KortexMathUtil::wrapDegreesFromZeroTo360(KortexMathUtil::toDeg(arm_commands_positions_[i])));
-          cmd_vel_tmp_ = static_cast<float>(KortexMathUtil::toDeg(arm_commands_velocities_[i]));
 
           base_command_.mutable_actuators(static_cast<int>(i))->set_position(cmd_degrees_tmp_);
           base_command_.mutable_actuators(static_cast<int>(i))->set_command_id(base_command_.frame_id());
